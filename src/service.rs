@@ -17,7 +17,6 @@ use umbra_rs::core::protocol::RelayerRequest;
 use rand::rngs::OsRng;
 use umbra_rs::core::{derive_for_initiator, encrypt_memo, Identity, PointWrapper, ScalarWrapper};
 
-// UMBRA PROGRAM ID
 const UMBRA_PROGRAM_ID: &str = "2L2TivMpeKJotzaHuQPUHDgfKaPwrvL5uGuhRw6dju96";
 
 pub struct UmbraService {
@@ -31,7 +30,6 @@ impl UmbraService {
     pub fn new(rpc_url: &str, db: Db) -> Self {
         let rpc_client = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
         
-        // Load relayer keypair from keys directory (Tom is our relayer)
         let keypair = match std::fs::read_to_string("../keys/Tom.json") {
             Ok(content) => {
                 let bytes: Vec<u8> = serde_json::from_str(&content)
@@ -82,22 +80,11 @@ impl UmbraService {
 
     pub async fn request_airdrop(&self, pubkey: &Pubkey, lamports: u64) -> Result<()> {
         let sig = self.rpc_client.request_airdrop(pubkey, lamports)?;
-        // Wait for confirmation?
-        // simple simulation usually fast on test validator
-        // But for robustness:
-        // self.rpc_client.confirm_transaction(&sig)?; // blocking
-        // async version? RpcClient is blocking client unless we use nonblocking.
-        // solana_client::rpc_client::RpcClient IS blocking.
-        // We are in async fn, but calling blocking RPC. It warns but works.
-        // We shouldn't block loop too long.
         tracing::info!("Airdropped {} to {}", lamports, pubkey);
         Ok(())
     }
 
     /// Executed by the Relayer.
-    /// 1. Verify fee is enough? (Optional logic here, strictly program checks it).
-    /// 2. Construct Transaction with Ed25519 Sig Verify + WithdrawWithRelayer.
-    /// 3. Sign and Send.
     pub async fn relay_transaction(&self, req: RelayerRequest) -> Result<String> {
         let stealth_pubkey = Pubkey::from_str(&req.stealth_pubkey).context("Invalid stealth pubkey")?;
         let recipient_pubkey = Pubkey::from_str(&req.recipient_pubkey).context("Invalid recipient pubkey")?;
@@ -116,13 +103,6 @@ impl UmbraService {
         message.extend_from_slice(&req.relayer_fee.to_le_bytes());
 
         // 3. Construct Ed25519 Instruction
-        // The Ed25519 Program expects: [num_sigs(1) | padding(1) | offsets...]
-        // We construct it manually or use solana_sdk::ed25519_instruction if available?
-        // solana_sdk doesn't export a builder easily for arbitrary messages without keypairs?
-        // actually `solana_sdk::ed25519_instruction::new_ed25519_instruction` takes keypair.
-        // We don't have the signer's private key! We have signature.
-        // So we must manually build the instruction data.
-        
         let mut ix_data = Vec::new();
         let num_signatures: u8 = 1;
         let padding: u8 = 0;
@@ -142,15 +122,7 @@ impl UmbraService {
         ix_data.extend_from_slice(&u16::MAX.to_le_bytes());                  // msg_ix
 
         // Append data
-        ix_data.extend_from_slice(stealth_pubkey.as_ref()); // Signer is the stealth pubkey (Wait? No)
-        // CHECK: Who signs the message?
-        // The Stealth Keypair (P_stealth) signs the message!
-        // But `stealth_pubkey` passed here is the PDA? No, it's the `stealth_pubkey` (P)!
-        // Verify: Client sends `stealth_pubkey` (P) as the authority.
-        // AND the `stealth_pda` is derived from it.
-        // The Program checks `stealth_pda` seeds = ["stealth", authority].
-        // So `stealth_pubkey` here MUST be the AUTHORITY (P).
-        // Correct.
+        ix_data.extend_from_slice(stealth_pubkey.as_ref()); 
         ix_data.extend_from_slice(&signature_bytes);
         ix_data.extend_from_slice(&message);
 

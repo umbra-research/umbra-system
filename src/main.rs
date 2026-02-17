@@ -23,18 +23,16 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    // Initialize DB (File based for persistence)
-    // mode=rwc enables Read-Write-Create
     let db = db::Db::new("sqlite:umbra.db?mode=rwc").await?;
 
-    // Start Scraper Background Task
     let scraper_rpc_url = "http://127.0.0.1:8899".to_string();
     let scraper_db = db.clone();
     tokio::spawn(async move {
         scraper::start_scraper(scraper_rpc_url, scraper_db).await;
     });
 
-    // Initialize Service with local validator URL
+
+
     let service = Arc::new(UmbraService::new("http://127.0.0.1:8899", db));
 
     let cors = CorsLayer::new()

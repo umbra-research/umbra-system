@@ -9,14 +9,12 @@ use base64::Engine;
 // Umbra Program ID (Localnet default)
 const UMBRA_PROGRAM_ID: &str = "2L2TivMpeKJotzaHuQPUHDgfKaPwrvL5uGuhRw6dju96";
 
-// Discriminator for StealthAnnouncement: sha256("event:StealthAnnouncement")[..8]
-// [197, 85, 83, 203, 142, 88, 5, 176]
 const ANNOUNCEMENT_DISCRIMINATOR: [u8; 8] = [110, 81, 147, 7, 34, 31, 5, 27];
 
 pub async fn start_scraper(rpc_url: String, db: Db) {
     let rpc_client = Arc::new(RpcClient::new_with_commitment(
         rpc_url,
-        CommitmentConfig::confirmed(), // Use confirmed to index faster, finalized is safer for reorgs.
+        CommitmentConfig::confirmed(),
     ));
     
     let program_id = Pubkey::from_str(UMBRA_PROGRAM_ID).unwrap();
@@ -42,7 +40,7 @@ async fn scrape_loop(
     let mut config = GetConfirmedSignaturesForAddress2Config {
         limit: Some(20),
         commitment: Some(CommitmentConfig::confirmed()),
-        ..Default::default() // before, until
+        ..Default::default()
     };
     if let Some(sig) = last_sig {
         config.until = Some(*sig);
@@ -50,15 +48,7 @@ async fn scrape_loop(
 
     let signatures = rpc.get_signatures_for_address_with_config(&program_id, config)?;
     
-    // Process in reverse (oldest first) if we want linear history, 
-    // but get_signatures returns newest first. 
-    // If we want to catch up:
-    // If we have 'until', we get newer txs.
-    // We should process them from oldest to newest to maintain order in DB?
-    // Actually, timestamp matters. 
-    
-    // Iterate reverse to process older ones first (if we fetched a batch of new ones).
-    // Note: get_signatures returns [Newest, ..., Oldest] within the limit.
+    // Process in reverse (oldest first)
     for sig_info in signatures.iter().rev() { 
         let signature = Signature::from_str(&sig_info.signature)?;
         *last_sig = Some(signature); 
@@ -74,7 +64,6 @@ async fn scrape_loop(
             max_supported_transaction_version: Some(0),
         })?;
 
-        // Extract payer from transaction account keys (first signer is always the fee payer)
         let payer = extract_payer(&tx.transaction.transaction);
 
         // 2. Parse Logs for Events
@@ -91,12 +80,6 @@ async fn scrape_loop(
                          // Decode Base64
                          if let Ok(data) = base64::engine::general_purpose::STANDARD.decode(data_str) {
                              if data.len() > 8 && data[0..8] == ANNOUNCEMENT_DISCRIMINATOR {
-                                 // Parse StealthAnnouncementEvent:
-                                 // [8..40]  Ephemeral Pubkey (32 bytes)
-                                 // [40..72] Hashed Tag (32 bytes)
-                                 // [72..76] Ciphertext Len (u32 LE)
-                                 // [76..76+ct_len] Ciphertext Data
-                                 // [76+ct_len] Option<Pubkey> token_mint (1 byte discriminator + optional 32 bytes)
                                  
                                  if data.len() < 76 { continue; }
                                  
